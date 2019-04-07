@@ -1,0 +1,10 @@
+FROM alpine:3.9.2 as builder
+
+RUN apk update
+RUN apk add ca-certificates
+
+FROM scratch
+
+ENTRYPOINT [ "/crashlytics2humio" ]
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY crashlytics2humio /
