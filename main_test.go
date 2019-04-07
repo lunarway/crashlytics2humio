@@ -176,6 +176,8 @@ func (p *pushRecorder) Push(push Push) error {
 	return nil
 }
 
+var _ Pusher = &pushFailer{}
+
 type pushFailer struct {
 	Err error
 }
