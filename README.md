@@ -4,6 +4,8 @@ This project forwarads Crashlytics incident notifications to Humio.
 
 This is considered in *alpha* stage. APIs and usage will change.
 
+[![Build Status](https://travis-ci.com/lunarway/crashlytics2humio.svg?branch=master)](https://travis-ci.com/lunarway/crashlytics2humio)
+
 # Design
 
 Crashlytics can trigger [webhooks on incident impact changes](https://docs.fabric.io/android/crashlytics/custom-web-hooks.html?web%20hooks#custom-web-hooks).
