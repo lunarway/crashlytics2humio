@@ -3,10 +3,13 @@ package main
 import (
 	"errors"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -121,7 +124,8 @@ func TestWebhookHandler(t *testing.T) {
 			code: http.StatusOK,
 			pushes: []Push{
 				{
-					Type: "issue",
+					Type:      "issue",
+					Timestamp: 0,
 					Data: map[string]interface{}{
 						"display_id":             float64(123),
 						"title":                  "Issue Title",
@@ -140,7 +144,9 @@ func TestWebhookHandler(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, "/webhook", tc.body)
 			pushRecorder := pushRecorder{}
-			webhookHandler(&pushRecorder)(recorder, req)
+			webhookHandler(func() time.Time {
+				return time.Unix(0, 0)
+			}, &pushRecorder)(recorder, req)
 			assert.Equal(t, tc.code, recorder.Code, "status code not as expected")
 			t.Logf("Expected\n%#+v", tc.pushes)
 			t.Logf("Got\n%#+v", pushRecorder.Pushes)
@@ -161,7 +167,9 @@ func TestWebhookHandler_pushFail(t *testing.T) {
 	pusher := pushFailer{
 		Err: errors.New("some unknown error"),
 	}
-	webhookHandler(&pusher)(recorder, req)
+	webhookHandler(func() time.Time {
+		return time.Unix(0, 0)
+	}, &pusher)(recorder, req)
 	assert.Equal(t, http.StatusOK, recorder.Code, "status code not as expected")
 }
 
@@ -184,4 +192,107 @@ type pushFailer struct {
 
 func (p *pushFailer) Push(push Push) error {
 	return p.Err
+}
+
+func TestHumioPusher_Push(t *testing.T) {
+	doRecoder := doRecorder{}
+	pusher := humioPusher{
+		url: url.URL{
+			Host:   "localhost:8080",
+			Scheme: "http",
+		},
+		httpClient:  &doRecoder,
+		ingestToken: "token",
+	}
+
+	err := pusher.Push(Push{
+		Type:      "issue",
+		Timestamp: 1,
+		Data: map[string]interface{}{
+			"title": "Issue Title",
+		},
+	})
+
+	if !assert.NoError(t, err, "unexpected push error") {
+		return
+	}
+	expectedPayload := `[{"events":[{"timestamp":1,"attributes":{"title":"Issue Title"}}]}]
+`
+	assert.Equal(t, expectedPayload, string(doRecoder.body), "request body not as expected")
+	authorization := doRecoder.req.Header.Get("Authorization")
+	assert.Equal(t, "Bearer token", authorization, "authorization header not as expected")
+	contentType := doRecoder.req.Header.Get("Content-Type")
+	assert.Equal(t, "application/json", contentType, "content-type header not as expected")
+	assert.Equal(t, "http://localhost:8080/api/v1/ingest/humio-structured", doRecoder.req.URL.String(), "url not as expected")
+}
+
+type doRecorder struct {
+	body []byte
+	req  *http.Request
+}
+
+func (r *doRecorder) Do(req *http.Request) (*http.Response, error) {
+	data, _ := ioutil.ReadAll(req.Body)
+	r.body = data
+	r.req = req
+	return &http.Response{
+		StatusCode: http.StatusOK,
+	}, nil
+}
+
+func TestValidateURL(t *testing.T) {
+	tt := []struct {
+		name   string
+		input  string
+		output string
+		err    error
+	}{
+		{
+			name:   "http url",
+			input:  "http://cloud.humio.com",
+			output: "http://cloud.humio.com",
+			err:    nil,
+		},
+		{
+			name:   "https url",
+			input:  "https://cloud.humio.com",
+			output: "https://cloud.humio.com",
+			err:    nil,
+		},
+		{
+			name:   "trailing slash",
+			input:  "https://cloud.humio.com/",
+			output: "https://cloud.humio.com/",
+			err:    nil,
+		},
+		{
+			name:   "scheme missing",
+			input:  "cloud.humio.com",
+			output: "",
+			err:    errors.New("schema required"),
+		},
+		{
+			name:   "tcp schema",
+			input:  "tcp://cloud.humio.com",
+			output: "",
+			err:    errors.New("only schemes http(s) are supported"),
+		},
+		{
+			name:   "relatve path",
+			input:  "http://cloud.humio.com/../asd",
+			output: "http://cloud.humio.com/asd",
+			err:    nil,
+		},
+	}
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := validateURL(tc.input)
+			if tc.err != nil {
+				assert.EqualError(t, err, tc.err.Error(), "output error not as expected")
+			} else {
+				assert.NoError(t, err, "no output error expected")
+			}
+			assert.Equal(t, tc.output, output.String(), "output not as expected")
+		})
+	}
 }
