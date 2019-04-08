@@ -1,6 +1,6 @@
 # Crashlytics incidents to Humio
 
-This project forwarads Crashlytics incident notifications to Humio.
+This project forwards Crashlytics incident notifications to Humio.
 
 This is considered in *alpha* stage. APIs and usage will change.
 
